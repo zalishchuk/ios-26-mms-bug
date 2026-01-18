@@ -1,0 +1,433 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iOS 26 ManagedMediaSource Cold Start Bug</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, system-ui, sans-serif;
+        padding: 20px;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 18px;
+        margin-bottom: 10px;
+      }
+      .info {
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+        padding: 12px 12px 12px 16px;
+        background: #f0f0f0;
+        border-radius: 8px;
+      }
+      .info ol {
+        margin: 8px 0 0 0;
+        padding-left: 20px;
+      }
+      .warning {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        color: #856404;
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+        font-size: 14px;
+      }
+      .tests {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 20px;
+      }
+      .tests a {
+        padding: 8px 12px;
+        background: #007aff;
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .tests a.active {
+        background: #333;
+      }
+      .tests a.pass {
+        background: #34c759;
+      }
+      .tests a.fail {
+        background: #ff3b30;
+      }
+      #log {
+        background: #1a1a1a;
+        color: #fff;
+        padding: 12px;
+        border-radius: 8px;
+        font-family: monospace;
+        font-size: 12px;
+        min-height: 200px;
+        max-height: 400px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+      .error {
+        color: #ff6b6b;
+      }
+      .success {
+        color: #69db7c;
+      }
+      .dim {
+        color: #888;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>iOS 26 ManagedMediaSource Cold Start Bug</h1>
+
+    <div class="info">
+      <strong>To reproduce:</strong>
+      <ol>
+        <li>Force-close Safari from the app switcher</li>
+        <li>Reopen Safari and load this page</li>
+        <li>The "simultaneous" test should fail with <code>readyState=ended</code></li>
+      </ol>
+      <p style="margin: 8px 0 0; font-size: 13px; color: #666;">
+        Note: Bug only affects the <em>first</em> MMS after cold start. Reload works fine.
+      </p>
+    </div>
+
+    <div id="warning" class="warning" style="display: none"></div>
+
+    <div class="tests">
+      <a href="?test=simultaneous" id="btn-simultaneous">simultaneous</a>
+      <a href="?test=sequential" id="btn-sequential">sequential</a>
+      <a href="?test=single" id="btn-single">single</a>
+      <a href="?test=warmup" id="btn-warmup">warmup</a>
+    </div>
+
+    <div id="log"></div>
+    <video id="video" muted playsinline style="display: none"></video>
+
+    <script>
+      const video = document.getElementById('video');
+      const logEl = document.getElementById('log');
+      const warningEl = document.getElementById('warning');
+
+      // Detect cold start vs reload using sessionStorage
+      const isColdStart = !sessionStorage.getItem('mms-test-visited');
+      sessionStorage.setItem('mms-test-visited', '1');
+
+      if (!isColdStart && warningEl) {
+        warningEl.textContent =
+          '⚠️ This is not a cold start. The bug may not reproduce. Force-close Safari and reopen to test properly.';
+        warningEl.style.display = 'block';
+      }
+
+      // Minimal ftyp box (20 bytes)
+      const FTYP = new Uint8Array([
+        0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+        0x00, 0x00, 0x00, 0x01, 0x69, 0x73, 0x6f, 0x6d,
+      ]);
+
+      function log(msg, type = '') {
+        const time = (performance.now() / 1000).toFixed(3);
+        const line = `[${time}s] ${msg}`;
+        console.log(line);
+        if (!logEl) return;
+        const span = document.createElement('span');
+        span.className = type;
+        span.textContent = line + '\n';
+        logEl.appendChild(span);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function cleanup() {
+        video.removeAttribute('src');
+        video.querySelectorAll('source').forEach((s) => s.remove());
+        video.load();
+      }
+
+      function attachMMS(ms) {
+        video.disableRemotePlayback = true;
+        const url = URL.createObjectURL(ms);
+        const source = document.createElement('source');
+        source.type = 'video/mp4';
+        source.src = url;
+        video.appendChild(source);
+        video.load();
+        return url;
+      }
+
+      function setResult(testName, passed) {
+        const btn = document.getElementById('btn-' + testName);
+        if (btn) btn.className = passed ? 'pass' : 'fail';
+      }
+
+      // Test: Simultaneous appends to 2 SourceBuffers (THE BUG)
+      async function testSimultaneous() {
+        log('TEST: Simultaneous appends to 2 SourceBuffers');
+        log('This should FAIL on cold start', 'dim');
+        cleanup();
+
+        return new Promise((resolve, reject) => {
+          const ms = new ManagedMediaSource();
+          attachMMS(ms);
+
+          ms.onsourceopen = () => {
+            log('sourceopen, readyState=' + ms.readyState);
+
+            const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+            const videoSb = ms.addSourceBuffer(
+              'video/mp4; codecs="avc1.42E01E"',
+            );
+            log('Created 2 SourceBuffers');
+
+            let audioDone = false,
+              videoDone = false,
+              hasError = false;
+
+            audioSb.onupdateend = () => {
+              log('Audio updateend, readyState=' + ms.readyState);
+              audioDone = true;
+              if (!hasError && audioDone && videoDone) {
+                log('SUCCESS: Both appends completed!', 'success');
+                resolve(true);
+              }
+            };
+            audioSb.onerror = () => {
+              log('Audio ERROR! readyState=' + ms.readyState, 'error');
+              log('Reload the page and it will work (bug only affects first MMS)', 'dim');
+              hasError = true;
+              reject(new Error('Audio append failed'));
+            };
+
+            videoSb.onupdateend = () => {
+              log('Video updateend, readyState=' + ms.readyState);
+              videoDone = true;
+              if (!hasError && audioDone && videoDone) {
+                log('SUCCESS: Both appends completed!', 'success');
+                resolve(true);
+              }
+            };
+            videoSb.onerror = () => {
+              log('Video ERROR! readyState=' + ms.readyState, 'error');
+              if (!hasError) {
+                log('Reload the page and it will work (bug only affects first MMS)', 'dim');
+              }
+              hasError = true;
+              reject(new Error('Video append failed'));
+            };
+
+            log('Appending to both simultaneously...');
+            audioSb.appendBuffer(FTYP);
+            videoSb.appendBuffer(FTYP);
+          };
+        });
+      }
+
+      // Test: Sequential appends (should work)
+      async function testSequential() {
+        log('TEST: Sequential appends to 2 SourceBuffers');
+        log('This should PASS (appends one at a time)', 'dim');
+        cleanup();
+
+        return new Promise((resolve, reject) => {
+          const ms = new ManagedMediaSource();
+          attachMMS(ms);
+
+          ms.onsourceopen = () => {
+            log('sourceopen, readyState=' + ms.readyState);
+
+            const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+            const videoSb = ms.addSourceBuffer(
+              'video/mp4; codecs="avc1.42E01E"',
+            );
+            log('Created 2 SourceBuffers');
+
+            audioSb.onerror = () => {
+              log('Audio ERROR! readyState=' + ms.readyState, 'error');
+              reject(new Error('Audio append failed'));
+            };
+            videoSb.onerror = () => {
+              log('Video ERROR! readyState=' + ms.readyState, 'error');
+              reject(new Error('Video append failed'));
+            };
+
+            log('Appending to audio first...');
+            audioSb.appendBuffer(FTYP);
+
+            audioSb.onupdateend = () => {
+              log('Audio updateend, readyState=' + ms.readyState);
+              log('Now appending to video...');
+              videoSb.appendBuffer(FTYP);
+
+              videoSb.onupdateend = () => {
+                log('Video updateend, readyState=' + ms.readyState);
+                log('SUCCESS: Sequential appends completed!', 'success');
+                resolve(true);
+              };
+            };
+          };
+        });
+      }
+
+      // Test: Single SourceBuffer (should work)
+      async function testSingle() {
+        log('TEST: Single SourceBuffer');
+        log('This should PASS (only 1 SB, no simultaneous issue)', 'dim');
+        cleanup();
+
+        return new Promise((resolve, reject) => {
+          const ms = new ManagedMediaSource();
+          attachMMS(ms);
+
+          ms.onsourceopen = () => {
+            log('sourceopen, readyState=' + ms.readyState);
+
+            const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+            log('Created 1 SourceBuffer');
+
+            sb.onerror = () => {
+              log('ERROR! readyState=' + ms.readyState, 'error');
+              reject(new Error('Append failed'));
+            };
+
+            log('Appending...');
+            sb.appendBuffer(FTYP);
+
+            sb.onupdateend = () => {
+              log('updateend, readyState=' + ms.readyState);
+              log('SUCCESS: Single SB append completed!', 'success');
+              resolve(true);
+            };
+          };
+        });
+      }
+
+      // Test: Warmup workaround then simultaneous
+      async function testWarmup() {
+        log('TEST: Warmup workaround + simultaneous appends');
+        log('This should PASS (warmup fixes cold start issue)', 'dim');
+        cleanup();
+
+        // Warmup phase
+        await new Promise((resolve) => {
+          log('Warmup: Creating sacrificial MMS...');
+          const ms = new ManagedMediaSource();
+          attachMMS(ms);
+
+          ms.onsourceopen = () => {
+            log('Warmup: sourceopen');
+            const sb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+            sb.appendBuffer(FTYP);
+            sb.onupdateend = () => {
+              log('Warmup: complete');
+              cleanup();
+              resolve();
+            };
+            sb.onerror = () => {
+              log('Warmup: error (continuing anyway)');
+              cleanup();
+              resolve();
+            };
+          };
+        });
+
+        // Now test simultaneous
+        log('--- Now testing simultaneous appends ---');
+        return new Promise((resolve, reject) => {
+          const ms = new ManagedMediaSource();
+          attachMMS(ms);
+
+          ms.onsourceopen = () => {
+            log('sourceopen, readyState=' + ms.readyState);
+
+            const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+            const videoSb = ms.addSourceBuffer(
+              'video/mp4; codecs="avc1.42E01E"',
+            );
+            log('Created 2 SourceBuffers');
+
+            let audioDone = false,
+              videoDone = false,
+              hasError = false;
+
+            audioSb.onupdateend = () => {
+              log('Audio updateend');
+              audioDone = true;
+              if (!hasError && audioDone && videoDone) {
+                log('SUCCESS: Warmup workaround works!', 'success');
+                resolve(true);
+              }
+            };
+            audioSb.onerror = () => {
+              log('Audio ERROR!', 'error');
+              hasError = true;
+              reject(new Error('Audio append failed'));
+            };
+
+            videoSb.onupdateend = () => {
+              log('Video updateend');
+              videoDone = true;
+              if (!hasError && audioDone && videoDone) {
+                log('SUCCESS: Warmup workaround works!', 'success');
+                resolve(true);
+              }
+            };
+            videoSb.onerror = () => {
+              log('Video ERROR!', 'error');
+              hasError = true;
+              reject(new Error('Video append failed'));
+            };
+
+            log('Appending to both simultaneously...');
+            audioSb.appendBuffer(FTYP);
+            videoSb.appendBuffer(FTYP);
+          };
+        });
+      }
+
+      // Main
+      const tests = {
+        simultaneous: testSimultaneous,
+        sequential: testSequential,
+        single: testSingle,
+        warmup: testWarmup,
+      };
+      const params = new URLSearchParams(location.search);
+      const testName = params.get('test') || 'simultaneous';
+
+      // Highlight active test
+      document.getElementById('btn-' + testName)?.classList.add('active');
+
+      if (!window.ManagedMediaSource) {
+        log('ManagedMediaSource not available', 'error');
+        log('This bug only affects iOS 26+ Safari', 'dim');
+      } else {
+        log('ManagedMediaSource available');
+        log('Running test: ' + testName);
+        log('---');
+
+        const testFn = tests[testName];
+        if (testFn) {
+          try {
+            testFn()
+              .then(() => setResult(testName, true))
+              .catch((err) => {
+                log('FAILED: ' + err.message, 'error');
+                setResult(testName, false);
+              });
+          } catch (err) {
+            log('ERROR: ' + err.message, 'error');
+          }
+        } else {
+          log('Unknown test: ' + testName, 'error');
+        }
+      }
+    </script>
+  </body>
+</html>
