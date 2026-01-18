@@ -95,7 +95,7 @@
         <li>Reopen Safari and load this page</li>
         <li>The "simultaneous" test should fail with <code>readyState=ended</code></li>
       </ol>
-      <p style="margin: 8px 0 0; font-size: 13px; color: #666;">
+      <p style="margin: 8px 0 0; font-size: 13px; color: #666">
         Note: Bug only affects the <em>first</em> MMS after cold start. Reload works fine.
       </p>
     </div>
@@ -107,6 +107,7 @@
       <a href="?test=sequential" id="btn-sequential">sequential</a>
       <a href="?test=single" id="btn-single">single</a>
       <a href="?test=warmup" id="btn-warmup">warmup</a>
+      <a href="?test=twice" id="btn-twice">twice</a>
     </div>
 
     <div id="log"></div>
@@ -129,8 +130,8 @@
 
       // Minimal ftyp box (20 bytes)
       const FTYP = new Uint8Array([
-        0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
-        0x00, 0x00, 0x00, 0x01, 0x69, 0x73, 0x6f, 0x6d,
+        0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x00,
+        0x01, 0x69, 0x73, 0x6f, 0x6d,
       ]);
 
       function log(msg, type = '') {
@@ -147,7 +148,7 @@
 
       function cleanup() {
         video.removeAttribute('src');
-        video.querySelectorAll('source').forEach((s) => s.remove());
+        video.querySelectorAll('source').forEach(s => s.remove());
         video.load();
       }
 
@@ -181,9 +182,7 @@
             log('sourceopen, readyState=' + ms.readyState);
 
             const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
-            const videoSb = ms.addSourceBuffer(
-              'video/mp4; codecs="avc1.42E01E"',
-            );
+            const videoSb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
             log('Created 2 SourceBuffers');
 
             let audioDone = false,
@@ -243,9 +242,7 @@
             log('sourceopen, readyState=' + ms.readyState);
 
             const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
-            const videoSb = ms.addSourceBuffer(
-              'video/mp4; codecs="avc1.42E01E"',
-            );
+            const videoSb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
             log('Created 2 SourceBuffers');
 
             audioSb.onerror = () => {
@@ -315,7 +312,7 @@
         cleanup();
 
         // Warmup phase
-        await new Promise((resolve) => {
+        await new Promise(resolve => {
           log('Warmup: Creating sacrificial MMS...');
           const ms = new ManagedMediaSource();
           attachMMS(ms);
@@ -347,9 +344,7 @@
             log('sourceopen, readyState=' + ms.readyState);
 
             const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
-            const videoSb = ms.addSourceBuffer(
-              'video/mp4; codecs="avc1.42E01E"',
-            );
+            const videoSb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
             log('Created 2 SourceBuffers');
 
             let audioDone = false,
@@ -391,12 +386,90 @@
         });
       }
 
+      // Test: Two attempts - first fails, second succeeds (proves bug is first-MMS-only)
+      async function testTwice() {
+        log('TEST: Two simultaneous attempts back-to-back');
+        log('First should FAIL, second should PASS', 'dim');
+        cleanup();
+
+        // Helper for simultaneous append
+        const trySimultaneous = label => {
+          return new Promise((resolve, reject) => {
+            const ms = new ManagedMediaSource();
+            attachMMS(ms);
+
+            ms.onsourceopen = () => {
+              log(label + ': sourceopen, readyState=' + ms.readyState);
+
+              const audioSb = ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
+              const videoSb = ms.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+
+              let audioDone = false,
+                videoDone = false,
+                hasError = false;
+
+              audioSb.onupdateend = () => {
+                audioDone = true;
+                if (!hasError && audioDone && videoDone) {
+                  log(label + ': SUCCESS', 'success');
+                  resolve(true);
+                }
+              };
+              audioSb.onerror = () => {
+                log(label + ': ERROR! readyState=' + ms.readyState, 'error');
+                hasError = true;
+                resolve(false);
+              };
+
+              videoSb.onupdateend = () => {
+                videoDone = true;
+                if (!hasError && audioDone && videoDone) {
+                  log(label + ': SUCCESS', 'success');
+                  resolve(true);
+                }
+              };
+              videoSb.onerror = () => {
+                if (!hasError) log(label + ': ERROR! readyState=' + ms.readyState, 'error');
+                hasError = true;
+                resolve(false);
+              };
+
+              log(label + ': appending simultaneously...');
+              audioSb.appendBuffer(FTYP);
+              videoSb.appendBuffer(FTYP);
+            };
+          });
+        };
+
+        // First attempt
+        log('--- Attempt 1 ---');
+        const first = await trySimultaneous('1st MMS');
+        cleanup();
+
+        // Second attempt
+        log('--- Attempt 2 ---');
+        const second = await trySimultaneous('2nd MMS');
+
+        if (!first && second) {
+          log('---');
+          log('PROVEN: Bug only affects first MMS!', 'success');
+          return true;
+        } else if (first && second) {
+          log('---');
+          log('Both passed - not a cold start?', 'dim');
+          return true;
+        } else {
+          throw new Error('Unexpected result');
+        }
+      }
+
       // Main
       const tests = {
         simultaneous: testSimultaneous,
         sequential: testSequential,
         single: testSingle,
         warmup: testWarmup,
+        twice: testTwice,
       };
       const params = new URLSearchParams(location.search);
       const testName = params.get('test') || 'simultaneous';
@@ -417,7 +490,7 @@
           try {
             testFn()
               .then(() => setResult(testName, true))
-              .catch((err) => {
+              .catch(err => {
                 log('FAILED: ' + err.message, 'error');
                 setResult(testName, false);
               });

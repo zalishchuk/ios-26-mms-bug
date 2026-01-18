@@ -19,12 +19,13 @@ On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened)
 
 ## Test Cases
 
-| Test           | Description             | Cold Start | After Reload |
-| -------------- | ----------------------- | ---------- | ------------ |
-| `simultaneous` | Append to 2 SBs at once | FAIL       | PASS         |
-| `sequential`   | Append one at a time    | PASS       | PASS         |
-| `single`       | Only 1 SourceBuffer     | PASS       | PASS         |
-| `warmup`       | Warmup MMS first        | PASS       | PASS         |
+| Test           | Description                | Cold Start        | After Reload |
+| -------------- | -------------------------- | ----------------- | ------------ |
+| `simultaneous` | Append to 2 SBs at once    | FAIL              | PASS         |
+| `sequential`   | Append one at a time       | PASS              | PASS         |
+| `single`       | Only 1 SourceBuffer        | PASS              | PASS         |
+| `warmup`       | Warmup MMS first           | PASS              | PASS         |
+| `twice`        | Two attempts back-to-back  | 1st FAIL, 2nd PASS| PASS         |
 
 ## Root Cause
 
