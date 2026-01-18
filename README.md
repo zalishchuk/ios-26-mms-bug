@@ -1,1 +1,40 @@
+# iOS 26 ManagedMediaSource Cold Start Bug
 
+On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened), the first `ManagedMediaSource` instance fails when doing simultaneous `appendBuffer` calls to multiple SourceBuffers.
+
+## The Bug
+
+- `readyState` shows `"open"` but internally it's `"ended"`
+- `sourceended` event never fires
+- Only affects the **first** MMS after cold start
+- Reload or new tab works fine
+
+## Reproduction
+
+1. Force-close Safari from the app switcher
+2. Reopen Safari and load the test page
+3. The "simultaneous" test fails with `readyState=ended`
+
+## Test Cases
+
+| Test           | Description             | Cold Start | After Reload |
+| -------------- | ----------------------- | ---------- | ------------ |
+| `simultaneous` | Append to 2 SBs at once | FAIL       | PASS         |
+| `sequential`   | Append one at a time    | PASS       | PASS         |
+| `single`       | Only 1 SourceBuffer     | PASS       | PASS         |
+| `warmup`       | Warmup MMS first        | PASS       | PASS         |
+
+## Root Cause
+
+Simultaneous `appendBuffer` calls to multiple SourceBuffers on the first MMS after browser cold start. Safari's MMS subsystem needs one complete append cycle to fully initialize.
+
+## Workarounds
+
+1. **Recovery**: Detect the error and create a fresh MMS
+2. **Warmup**: Create a sacrificial MMS, complete one append, then use the real MMS
+3. **Sequential**: Serialize the first append (wait for `updateend` before second append)
+
+## Related
+
+- Affects: iOS 26+ Safari with ManagedMediaSource
+- Found in: [hls.js](https://github.com/video-dev/hls.js)
