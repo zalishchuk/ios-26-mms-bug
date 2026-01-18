@@ -1,5 +1,7 @@
 # iOS 26 ManagedMediaSource Cold Start Bug
 
+**Reproduction Demo:** https://zalishchuk.github.io/ios-26-mms-bug/
+
 On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened), the first `ManagedMediaSource` instance fails when doing simultaneous `appendBuffer` calls to multiple SourceBuffers.
 
 ## The Bug
