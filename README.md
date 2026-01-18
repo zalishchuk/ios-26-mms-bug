@@ -19,13 +19,13 @@ On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened)
 
 ## Test Cases
 
-| Test           | Description                | Cold Start        | After Reload |
-| -------------- | -------------------------- | ----------------- | ------------ |
-| `simultaneous` | Append to 2 SBs at once    | FAIL              | PASS         |
-| `sequential`   | Append one at a time       | PASS              | PASS         |
-| `single`       | Only 1 SourceBuffer        | PASS              | PASS         |
-| `warmup`       | Warmup MMS first           | PASS              | PASS         |
-| `twice`        | Two attempts back-to-back  | 1st FAIL, 2nd PASS| PASS         |
+| Test           | Description               | Cold Start         | After Reload |
+| -------------- | ------------------------- | ------------------ | ------------ |
+| `simultaneous` | Append to 2 SBs at once   | FAIL               | PASS         |
+| `sequential`   | Append one at a time      | PASS               | PASS         |
+| `single`       | Only 1 SourceBuffer       | PASS               | PASS         |
+| `warmup`       | Warmup MMS first          | PASS               | PASS         |
+| `twice`        | Two attempts back-to-back | 1st FAIL, 2nd PASS | PASS         |
 
 ## Root Cause
 
@@ -41,3 +41,6 @@ Simultaneous `appendBuffer` calls to multiple SourceBuffers on the first MMS aft
 
 - Affects: iOS 26+ Safari with ManagedMediaSource
 - Found in: [hls.js](https://github.com/video-dev/hls.js)
+- https://github.com/video-dev/hls.js/pull/7683
+- https://github.com/video-dev/hls.js/pull/7693
+- https://github.com/video-dev/hls.js/issues/7687
