@@ -12,7 +12,17 @@ https://github.com/user-attachments/assets/0f4c5b88-652f-4c82-8ccc-e6312c07f41e
 - `sourceended` event never fires
 - Only affects the **first** MMS after cold start
 - Reload or new tab works fine
-- Cannot be reproduced on previous iOS versions
+
+### Affected Versions
+
+| Environment                | iOS 26.0 | iOS 26.1 | iOS 26.2 |
+| -------------------------- | -------- | -------- | -------- |
+| Xcode Simulator            | OK       | OK       | OK       |
+| Real device (BrowserStack) | OK       | OK       | BUG      |
+| Real device (physical)     | ?        | ?        | BUG      |
+
+> [!NOTE]
+> The bug cannot be reproduced on Xcode-emulated iOS 26.2 devices.
 
 ## Reproduction
 
