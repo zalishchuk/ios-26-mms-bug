@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/0f4c5b88-652f-4c82-8ccc-e6312c07f41e
 | Real device (physical)     | ?        | ?        | BUG      |
 
 > [!NOTE]
-> The bug cannot be reproduced on Xcode-emulated iOS 26.2 devices.
+> The bug cannot be reproduced on Xcode-emulated iOS 26.2 devices, but still reproduces on real physical devices.
 
 ## Reproduction
 
