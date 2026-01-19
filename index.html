@@ -108,6 +108,10 @@
       <a href="?test=single" id="btn-single">single</a>
       <a href="?test=warmup" id="btn-warmup">warmup</a>
       <a href="?test=twice" id="btn-twice">twice</a>
+      <a href="?test=dual-mms" id="btn-dual-mms">dual-mms</a>
+      <a href="?test=dual-mms-single-append" id="btn-dual-mms-single-append"
+        >dual-mms-single-append</a
+      >
     </div>
 
     <div id="log"></div>
@@ -463,6 +467,185 @@
         }
       }
 
+      // Test: Two separate MMS instances with separate video elements, appending simultaneously
+      async function testDualMMS() {
+        log('TEST: Two MMS instances appending simultaneously');
+        log('Each MMS has its own video element and single SourceBuffer', 'dim');
+        cleanup();
+
+        // Create two video elements
+        const video1 = document.createElement('video');
+        const video2 = document.createElement('video');
+        video1.muted = video2.muted = true;
+        video1.playsInline = video2.playsInline = true;
+        video1.style.display = video2.style.display = 'none';
+        document.body.appendChild(video1);
+        document.body.appendChild(video2);
+
+        const attachToVideo = (ms, videoEl) => {
+          videoEl.disableRemotePlayback = true;
+          const url = URL.createObjectURL(ms);
+          const source = document.createElement('source');
+          source.type = 'video/mp4';
+          source.src = url;
+          videoEl.appendChild(source);
+          videoEl.load();
+          return url;
+        };
+
+        const cleanupVideos = () => {
+          video1.remove();
+          video2.remove();
+        };
+
+        return new Promise((resolve, reject) => {
+          const ms1 = new ManagedMediaSource();
+          const ms2 = new ManagedMediaSource();
+
+          attachToVideo(ms1, video1);
+          attachToVideo(ms2, video2);
+
+          let ms1Done = false,
+            ms2Done = false,
+            hasError = false;
+          let ms1Open = false,
+            ms2Open = false;
+
+          const tryAppend = () => {
+            if (!ms1Open || !ms2Open) return;
+
+            log('Both MMS open, creating SourceBuffers...');
+            const sb1 = ms1.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+            const sb2 = ms2.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+
+            sb1.onupdateend = () => {
+              log('MMS1: updateend', 'success');
+              ms1Done = true;
+              if (!hasError && ms1Done && ms2Done) {
+                log('SUCCESS: Both MMS appends completed!', 'success');
+                cleanupVideos();
+                resolve(true);
+              }
+            };
+            sb1.onerror = () => {
+              log('MMS1: ERROR! readyState=' + ms1.readyState, 'error');
+              hasError = true;
+              cleanupVideos();
+              reject(new Error('MMS1 append failed'));
+            };
+
+            sb2.onupdateend = () => {
+              log('MMS2: updateend', 'success');
+              ms2Done = true;
+              if (!hasError && ms1Done && ms2Done) {
+                log('SUCCESS: Both MMS appends completed!', 'success');
+                cleanupVideos();
+                resolve(true);
+              }
+            };
+            sb2.onerror = () => {
+              log('MMS2: ERROR! readyState=' + ms2.readyState, 'error');
+              hasError = true;
+              cleanupVideos();
+              reject(new Error('MMS2 append failed'));
+            };
+
+            log('Appending to both MMS simultaneously...');
+            sb1.appendBuffer(FTYP);
+            sb2.appendBuffer(FTYP);
+          };
+
+          ms1.onsourceopen = () => {
+            log('MMS1: sourceopen');
+            ms1Open = true;
+            tryAppend();
+          };
+
+          ms2.onsourceopen = () => {
+            log('MMS2: sourceopen');
+            ms2Open = true;
+            tryAppend();
+          };
+        });
+      }
+
+      // Test: Two MMS instances but only append to one
+      async function testDualMMSSingleAppend() {
+        log('TEST: Two MMS instances, append to only one');
+        log('Create 2 MMS with 1 SB each, but only append to first', 'dim');
+        cleanup();
+
+        const video1 = document.createElement('video');
+        const video2 = document.createElement('video');
+        video1.muted = video2.muted = true;
+        video1.playsInline = video2.playsInline = true;
+        video1.style.display = video2.style.display = 'none';
+        document.body.appendChild(video1);
+        document.body.appendChild(video2);
+
+        const attachToVideo = (ms, videoEl) => {
+          videoEl.disableRemotePlayback = true;
+          const url = URL.createObjectURL(ms);
+          const source = document.createElement('source');
+          source.type = 'video/mp4';
+          source.src = url;
+          videoEl.appendChild(source);
+          videoEl.load();
+          return url;
+        };
+
+        const cleanupVideos = () => {
+          video1.remove();
+          video2.remove();
+        };
+
+        return new Promise((resolve, reject) => {
+          const ms1 = new ManagedMediaSource();
+          const ms2 = new ManagedMediaSource();
+
+          attachToVideo(ms1, video1);
+          attachToVideo(ms2, video2);
+
+          let ms1Open = false,
+            ms2Open = false;
+
+          const tryAppend = () => {
+            if (!ms1Open || !ms2Open) return;
+
+            log('Both MMS open, creating SourceBuffers...');
+            const sb1 = ms1.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+            const sb2 = ms2.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
+            log('Created SB in both MMS, but only appending to MMS1...');
+
+            sb1.onupdateend = () => {
+              log('MMS1: updateend, readyState=' + ms1.readyState, 'success');
+              log('SUCCESS: Single append with 2 MMS works!', 'success');
+              cleanupVideos();
+              resolve(true);
+            };
+            sb1.onerror = () => {
+              log('MMS1: ERROR! readyState=' + ms1.readyState, 'error');
+              cleanupVideos();
+              reject(new Error('MMS1 append failed'));
+            };
+
+            sb1.appendBuffer(FTYP);
+          };
+
+          ms1.onsourceopen = () => {
+            log('MMS1: sourceopen');
+            ms1Open = true;
+            tryAppend();
+          };
+
+          ms2.onsourceopen = () => {
+            log('MMS2: sourceopen');
+            ms2Open = true;
+            tryAppend();
+          };
+        });
+      }
+
       // Main
       const tests = {
         simultaneous: testSimultaneous,
@@ -470,6 +653,8 @@
         single: testSingle,
         warmup: testWarmup,
         twice: testTwice,
+        'dual-mms': testDualMMS,
+        'dual-mms-single-append': testDualMMSSingleAppend,
       };
       const params = new URLSearchParams(location.search);
       const testName = params.get('test') || 'simultaneous';

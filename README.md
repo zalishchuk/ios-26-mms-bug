@@ -2,7 +2,10 @@
 
 **Reproduction Demo:** https://zalishchuk.github.io/ios-26-mms-bug/
 
-On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened), the first `ManagedMediaSource` instance fails when doing simultaneous `appendBuffer` calls to multiple SourceBuffers.
+On iOS 26 Safari, when the browser is "cold started" (force-closed and reopened), concurrent `appendBuffer` calls fail due to a race condition in `mediaparserd` initialization.
+
+> [!IMPORTANT]
+> See [INVESTIGATION.md](./INVESTIGATION.md) for detailed iOS system logs and analysis of the `mediaparserd` race condition.
 
 https://github.com/user-attachments/assets/0f4c5b88-652f-4c82-8ccc-e6312c07f41e
 
@@ -32,17 +35,19 @@ https://github.com/user-attachments/assets/0f4c5b88-652f-4c82-8ccc-e6312c07f41e
 
 ## Test Cases
 
-| Test           | Description               | Cold Start         | After Reload |
-| -------------- | ------------------------- | ------------------ | ------------ |
-| `simultaneous` | Append to 2 SBs at once   | FAIL               | PASS         |
-| `sequential`   | Append one at a time      | PASS               | PASS         |
-| `single`       | Only 1 SourceBuffer       | PASS               | PASS         |
-| `warmup`       | Warmup MMS first          | PASS               | PASS         |
-| `twice`        | Two attempts back-to-back | 1st FAIL, 2nd PASS | PASS         |
+| Test                     | Description                     | Cold Start         | After Reload |
+| ------------------------ | ------------------------------- | ------------------ | ------------ |
+| `simultaneous`           | Append to 2 SBs at once         | FAIL               | PASS         |
+| `sequential`             | Append one at a time            | PASS               | PASS         |
+| `single`                 | Only 1 SourceBuffer             | PASS               | PASS         |
+| `warmup`                 | Warmup MMS first                | PASS               | PASS         |
+| `twice`                  | Two attempts back-to-back       | 1st FAIL, 2nd PASS | PASS         |
+| `dual-mms`               | 2 MMS, 1 SB each, concurrent    | FAIL               | PASS         |
+| `dual-mms-single-append` | 2 MMS, 1 SB each, single append | PASS               | PASS         |
 
 ## Root Cause
 
-Simultaneous `appendBuffer` calls to multiple SourceBuffers on the first MMS after browser cold start. Safari's MMS subsystem needs one complete append cycle to fully initialize.
+Concurrent parsing requests to `mediaparserd` during its first connection to the GPU process after browser cold start. The race is not limited to multiple SourceBuffers within one MMS — even two separate MMS instances with one SourceBuffer each will fail if they append simultaneously. One request succeeds, the other fails with `ParsingFailed`.
 
 ## Workarounds
 
